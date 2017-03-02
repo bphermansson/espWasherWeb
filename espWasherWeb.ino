@@ -137,7 +137,6 @@ void handleRoot() {
   // Show what you got
   Serial.print("Got time from server: ");
   Serial.print(hour());
-  //printDigits(minute());
   Serial.println();
  }
 }
@@ -173,9 +172,6 @@ void setup() {
     for (int i = 0; i < n; i++) {
       for (int j = i + 1; j < n; j++) {
         if (WiFi.RSSI(indices[j]) > WiFi.RSSI(indices[i])) {
-          //int temp = indices[j];
-          //indices[j] = indices[i];
-          //indices[i] = temp;
           std::swap(indices[i], indices[j]);
         }
       }
@@ -202,12 +198,6 @@ void setup() {
 
   // Port defaults to 8266
   // ArduinoOTA.setPort(8266);
-
-  // Hostname defaults to esp8266-[ChipID]
-  // ArduinoOTA.setHostname("myesp8266");
-
-  // No authentication by default
-  // ArduinoOTA.setPassword((const char *)"123");
 
   ArduinoOTA.onStart([]() {
     Serial.println("Start");
@@ -263,7 +253,6 @@ void loop() {
 
 void showOnLcd(String localip){
     lcd.clear();
-
     // Print IP address
     lcd.setCursor(0,0);   // (Col, Row)
     String ipshort = String(localip);
