@@ -65,13 +65,14 @@ EmonLiteESP power;
 // Number of samples each time you measure
 #define SAMPLES_X_MEASUREMENT   1000
 
+String localip;
 
 unsigned int currentCallback() {
   // If usingthe ADC GPIO in the ESP8266
   return analogRead(CURRENT_PIN);
 }
 
-const char* ssid = "NETGEAR83";
+char ssid[]="NETGEAR83";
 const char* password = "..........";
 
 ESP8266WebServer server(80);
@@ -79,6 +80,11 @@ ESP8266WebServer server(80);
 #include <dht11.h>
 dht11 DHT11;
 #define DHT11PIN 13
+
+//For Json output
+StaticJsonBuffer<200> jsonBuffer;
+JsonObject& root = jsonBuffer.createObject();
+
 
 void handleRoot() {
   int chk = DHT11.read(DHT11PIN);    // READ DATA
@@ -89,16 +95,31 @@ void handleRoot() {
 
   // Get power reading from Current Transformer
   double current = power.getCurrent(SAMPLES_X_MEASUREMENT);
+  int cpower = current * MAINS_VOLTAGE;
 
   Serial.print(temp);
   Serial.println("C");
   Serial.print(hum);
   Serial.println("%");
-  Serial.print(int(current * MAINS_VOLTAGE));
+  Serial.print(cpower);
   Serial.println("W");
 
-  String servermess=shortTemp+":"+humShort;
+  time_t t = now();
 
+  // Create Json string
+  // Set values in Json variable
+
+  root["time"] = String(t);
+  root["temp"] = temp;
+  root["humidity"] = hum;
+  root["power"] = cpower;
+  //root.printTo(Serial);
+  char buffer[256];
+  root.printTo(buffer, sizeof(buffer));
+  String servermess=buffer;
+  // Respond to client
+  server.send(200, "text/plain", buffer);
+  
 // Check if the request from the client contains current hours and minute
  if (server.hasArg("time")) {
   unsigned long iclienttime;
@@ -116,21 +137,63 @@ void handleRoot() {
   // Show what you got
   Serial.print("Got time from server: ");
   Serial.print(hour());
-  printDigits(minute());
+  //printDigits(minute());
   Serial.println();
  }
-  
-  server.send(200, "text/plain", servermess);
-  
 }
 
 void setup() {
+  char* bestWifi[15];
   Serial.begin(115200);
   Serial.println("Booting");
 
+  // Start lcd
+  lcd.begin();
+  lcd.clear();
+  lcd.setContrast(0x20);
+  lcd.setCursor(0,0);
+  lcd.print("Hello World");  
+
   // Setup wifi
+
+  // WiFi.scanNetworks will return the number of networks found
+  int n = WiFi.scanNetworks(false,true);
+  Serial.println("scan done");
+  Serial.println(n);
+
+  if (n == 0)
+    Serial.println("no networks found");
+  else
+  {
+    // sort by RSSI
+    int indices[n];
+    for (int i = 0; i < n; i++) {
+      indices[i] = i;
+    }
+    for (int i = 0; i < n; i++) {
+      for (int j = i + 1; j < n; j++) {
+        if (WiFi.RSSI(indices[j]) > WiFi.RSSI(indices[i])) {
+          //int temp = indices[j];
+          //indices[j] = indices[i];
+          //indices[i] = temp;
+          std::swap(indices[i], indices[j]);
+        }
+      }
+      Serial.print(WiFi.SSID(i));
+      Serial.print("-");
+      Serial.println(WiFi.RSSI(i));
+    }
+          Serial.print("Best Wifi found: ");
+          Serial.println(WiFi.SSID(0));
+          strcpy (ssid, WiFi.SSID(0).c_str());
+          lcd.setCursor(0,1);
+          lcd.print(WiFi.SSID(0));
+  }
+  
   WiFi.mode(WIFI_STA);
+  // Connect to strongest network
   WiFi.begin(ssid, password);
+
   while (WiFi.waitForConnectResult() != WL_CONNECTED) {
     Serial.println("Connection Failed! Rebooting...");
     delay(5000);
@@ -165,8 +228,10 @@ void setup() {
   });
   ArduinoOTA.begin();
   Serial.println("Ready");
+  
+  localip = WiFi.localIP().toString();
   Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
+  Serial.println(localip);
 
   if (MDNS.begin("esp8266")) {
     Serial.println("MDNS responder started");
@@ -177,25 +242,9 @@ void setup() {
   server.begin();
   Serial.println("HTTP server started");
 
-  // Start lcd
-  lcd.begin();
-  lcd.clear();
-  lcd.setContrast(0x20);
-  lcd.setCursor(0,0);
-  lcd.print("Hello World");
-
   // Init current meter
-  power.initCurrent(currentCallback, ADC_BITS, REFERENCE_VOLTAGE, CURRENT_RATIO);
-  
-  /*
-  int chk = DHT11.read(DHT11PIN);    // READ DATA
-  String temp = String((float)DHT11.temperature,2);
-  Serial.println(temp);
-  */
-
-  
+  power.initCurrent(currentCallback, ADC_BITS, REFERENCE_VOLTAGE, CURRENT_RATIO);  
 }
-
 void loop() {
   ArduinoOTA.handle();
   server.handleClient();
@@ -207,17 +256,25 @@ void loop() {
     lastMsg = now;
     // Update lcd
     Serial.println("Update lcd");
-    showOnLcd();
+    showOnLcd(localip);
     
   }  
 }
 
-void showOnLcd(){
+void showOnLcd(String localip){
     lcd.clear();
+
+    // Print IP address
+    lcd.setCursor(0,0);   // (Col, Row)
+    String ipshort = String(localip);
+    ipshort.remove(0,9);
+    lcd.print("IP: ");
+    lcd.print(ipshort);
+
     // Print time
     time_t t = now();
     if (timeStatus()!= timeNotSet) {
-      lcd.setCursor(2,0);   // (Col, Row)
+      lcd.setCursor(0,1);   // (Col, Row)
       lcd.print("Tid: ");
       String curHour = String (hour(t));
       String curMinute = String(minute(t));
@@ -244,9 +301,10 @@ void showOnLcd(){
 
     // Read power and display
     double current = power.getCurrent(SAMPLES_X_MEASUREMENT);
-    lcd.setCursor(2,4);
-    lcd.print("Ström: ");
-    lcd.print(String(current * MAINS_VOLTAGE));
+    lcd.setCursor(1,4);
+    lcd.print("Pwr: ");
+    lcd.print(String(round(current * MAINS_VOLTAGE)));
+    lcd.print("W");
 
     // Also print to serial port
     Serial.print(temp);
