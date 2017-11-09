@@ -27,6 +27,9 @@ Serial baud rate: 115200
 // For state machine
 long lastMsg = 0;
 
+String temp, hum, curHour, curMinute;
+double current;
+
 #include "ESP8266_Nokia5110.h"
 #define PIN_SCE   5  //CE
 #define PIN_RESET 4  //RST
@@ -67,6 +70,11 @@ EmonLiteESP power;
 
 String localip;
 
+//For Json output
+StaticJsonBuffer<200> jsonBuffer;
+JsonObject& root = jsonBuffer.createObject();
+char msg[100];
+
 unsigned int currentCallback() {
   // If usingthe ADC GPIO in the ESP8266
   return analogRead(CURRENT_PIN);
@@ -81,10 +89,11 @@ ESP8266WebServer server(80);
 dht11 DHT11;
 #define DHT11PIN 13
 
-//For Json output
-StaticJsonBuffer<200> jsonBuffer;
-JsonObject& root = jsonBuffer.createObject();
-
+// Mqtt
+#include <PubSubClient.h>
+WiFiClient espClient;
+PubSubClient client(espClient);
+const char* mqtt_server = "192.168.1.79";
 
 void handleRoot() {
   int chk = DHT11.read(DHT11PIN);    // READ DATA
@@ -113,6 +122,7 @@ void handleRoot() {
   root["temp"] = temp;
   root["humidity"] = hum;
   root["power"] = cpower;
+  root["test"] = 1;
   //root.printTo(Serial);
   char buffer[256];
   root.printTo(buffer, sizeof(buffer));
@@ -196,6 +206,9 @@ void setup() {
     ESP.restart();
   }
 
+  // Mqtt
+  client.setServer(mqtt_server, 1883);
+
   // Port defaults to 8266
   // ArduinoOTA.setPort(8266);
 
@@ -241,13 +254,33 @@ void loop() {
 
   // "State machine", check sensor and send values when 2 minutes have passed. 
   long now = millis();
-  //if (now - lastMsg > 120000) {  // Every 2 minutes
-  if (now - lastMsg > 10000) {  // Every 10 seconds
+  if (now - lastMsg > 120000) {  // Every 2 minutes
+  //if (now - lastMsg > 10000) {  // Every 10 seconds
     lastMsg = now;
     // Update lcd
     Serial.println("Update lcd");
     showOnLcd(localip);
+
+    // Mqtt
+    if (!client.connected()) {
+      reconnect();
+    }
+    client.loop();
     
+    String c = String(current);
+    /*
+    String message = curHour + ":" + curMinute + ";" + temp + ";" + hum + ";" + c;
+    char cmessage[100];
+    message.toCharArray(cmessage, 100);
+    bool res = client.publish("EspWasher", cmessage, 100);
+    */
+    root["time"] = curHour + "." + curMinute;
+    root["temp"] = temp;
+    root["hum"] = hum;
+    root["current"] = c;
+    
+    root.printTo((char*)msg, root.measureLength() + 1);
+    client.publish("EspWasher", msg);  // Wants a char
   }  
 }
 
@@ -265,8 +298,8 @@ void showOnLcd(String localip){
     if (timeStatus()!= timeNotSet) {
       lcd.setCursor(0,1);   // (Col, Row)
       lcd.print("Tid: ");
-      String curHour = String (hour(t));
-      String curMinute = String(minute(t));
+      curHour = String (hour(t));
+      curMinute = String(minute(t));
       if (minute(t)<10) {
         curMinute="0"+curMinute;
       }
@@ -281,15 +314,15 @@ void showOnLcd(String localip){
       Serial.println("Time not set");
     }
     int chk = DHT11.read(DHT11PIN);    // READ DATA, temp and humidity
-    String temp = String((float)DHT11.temperature,1);
-    String hum = String((float)DHT11.humidity, 0);
+    temp = String((float)DHT11.temperature,1);
+    hum = String((float)DHT11.humidity, 0);
     lcd.setCursor(2,2);
     lcd.print("Temp: " + temp+"C");
     lcd.setCursor(2,3);
     lcd.print("Fukt: " + hum+"%");
 
     // Read power and display
-    double current = power.getCurrent(SAMPLES_X_MEASUREMENT);
+    current = power.getCurrent(SAMPLES_X_MEASUREMENT);
     lcd.setCursor(1,4);
     lcd.print("Pwr: ");
     lcd.print(String(round(current * MAINS_VOLTAGE)));
@@ -329,4 +362,23 @@ void printDigits(int digits){
   if(digits < 10)
     Serial.print('0');
   Serial.print(digits);
+}
+
+void reconnect() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    // Attempt to connect
+    if (client.connect("EspWasherWeb", "emonpi", "emonpimqtt2016")) {
+      Serial.println("connected");
+      // Once connected, publish an announcement...
+      //client.publish("EspWasher","hello world from washer");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
 }
