@@ -1,5 +1,5 @@
 /*
-- Based on a Esp-12
+- Based on a Esp-12 (Compile for Nodemcu)
 -Read temp and humidity from a DHT11.
 -Read current from a current sensor (HWCT004).
 -Present results on a graphical LCD (Nokia 5110 type, PCD8544).
@@ -115,20 +115,6 @@ void handleRoot() {
 
   time_t t = now();
 
-  // Create Json string
-  // Set values in Json variable
-
-  root["time"] = String(t);
-  root["temp"] = temp;
-  root["humidity"] = hum;
-  root["power"] = cpower;
-  root["test"] = 1;
-  //root.printTo(Serial);
-  char buffer[256];
-  root.printTo(buffer, sizeof(buffer));
-  String servermess=buffer;
-  // Respond to client
-  server.send(200, "text/plain", buffer);
   
 // Check if the request from the client contains current hours and minute
  if (server.hasArg("time")) {
@@ -149,6 +135,23 @@ void handleRoot() {
   Serial.print(hour());
   Serial.println();
  }
+
+
+  // Create Json string
+  // Set values in Json variable
+
+  root["time"] = String(t);
+  root["temp"] = temp;
+  root["humidity"] = hum;
+  root["power"] = cpower;
+  root["test"] = 1;
+  
+  char buffer[256];
+  root.printTo(buffer, sizeof(buffer));
+  String servermess=buffer;
+  // Respond to client
+  server.send(200, "text/plain", buffer);
+ 
 }
 
 void setup() {
